@@ -1,92 +1,262 @@
-# LLM API Prompting Toolkit
+# LLMBridge
 
-This package builds on top of OpenAI API. It provides an easy-to-use prompting interface that:
-- performs asynchronous requests
-- tracks costs (both hypothetical and actual)
-- caches responses
+A unified interface that bridges different LLM providers (OpenAI, HuggingFace, OpenRouter, etc.) with a common API, featuring cost tracking and caching capabilities.
 
-(Originally, this package is supposed to be an interface that aligns Huggingface's Transformers interface with OpenAI's API, hence the name openai-hf-interface)
+## Features
+
+- **Unified API**: Use the same interface for different LLM providers
+- **Cost Tracking**: Monitor your API usage and costs in real-time
+- **Caching**: Save money and improve response times with disk-based caching
+- **Easy Model Management**: Add new models with simple configuration updates
+- **OpenRouter Support**: Full integration with OpenRouter's model marketplace
 
 ## Installation
 
-To `import openai_hf_interface` in your project, go to the project's top-level directory and run the following script:
+```bash
+# Clone the repository
+git clone <your-repo-url>
+cd llm-bridge
 
+# Install the package in editable mode
+uv pip install -e LLMBridge/
+
+# Activate the virtual environment
+source .venv/bin/activate
 ```
-git clone https://github.com/topwasu/openai-hf-interface.git
-cd openai-hf-interface
-pip install -e .
+
+## Quick Start with OpenRouter
+
+### 1. Set up your API key
+
+```bash
+export OPENROUTER_API_KEY="your_openrouter_api_key_here"
 ```
 
-## Usage
+### 2. Basic Usage
 
+```python
+from llmbridge import create_llm, choose_provider
+
+# Choose OpenRouter as your provider
+choose_provider('openrouter')
+
+# Create a model instance
+model = create_llm('google/gemini-2.5-pro-preview')
+
+# ⚠️ IMPORTANT: Always pass prompts as a LIST, not a string!
+prompt = "Hello, how are you today?"
+response = model.prompt([prompt], max_tokens=500, temperature=0.7)[0]
+print(response)
 ```
-import os
-os.environ['OPENAI_API_KEY'] = 'PUT-YOUR-KEY-HERE'
-from openai_hf_interface import create_llm, choose_provider
 
-choose_provider('openai') # or choose_provider('openrouter')
-llm = create_llm('gpt-4o-2024-08-06')
-llm.setup_cache('disk')
-prompt1 = 'Who are you?'
-prompt2 = ('what is this picture? explain in a single sentence', './example_img/fake_pikachu.jpg')
-prompt3 = [('what is this picture? explain in a single setnece', './example_img/fake_pikachu.jpg'),
-           'This image depicts a stylized, electrified version of Pikachu with glowing eyes and lightning bolts in the background.',
-           'It does not look like Pikachu to me. What is your second guess?']
-print(llm.prompt([prompt1, prompt2, prompt3], temperature=0, seed=0))
+## ⚠️ Critical: Prompt Format
 
-# Outputs you will get vvv
-# Output 1 ==> 'I am an AI language model created by OpenAI, designed to assist with a wide range of questions and tasks by providing information and generating text based on the input I receive. How can I assist you today?', 
-# Output 2 ==> 'This image depicts a stylized, electrified version of Pikachu with glowing eyes and lightning bolts in the background.', 
-# Output 3 ==> 'This image features a cartoonish, electrified character with large, glowing eyes and lightning bolts, resembling a playful, energetic creature.'
-# Note: These three requests were sent to Openai API asynchronously!
-"""
+**ALWAYS pass prompts as a list, not a string!**
+
+```python
+# ❌ WRONG - This will break your string into characters!
+response = model.prompt("Hello world", max_tokens=100)
+
+# ✅ CORRECT - Pass as a list
+response = model.prompt(["Hello world"], max_tokens=100)[0]
+
+# ✅ CORRECT - Multiple prompts
+responses = model.prompt(["Hello", "How are you?"], max_tokens=100)
 ```
-We also provide asynchronous version of `prompt` as `aprompt`. They work exactly the same -- the latter can be used inside an `async` function.
 
-## Cost tracking
+## Cost Tracking
 
-The llm object has a method called `get_info` that will output a dictionary containing various information.
+LLMBridge provides detailed cost tracking for all your API calls:
+
+```python
+from llmbridge import create_llm, choose_provider
+
+choose_provider('openrouter')
+model = create_llm('google/gemini-2.5-pro-preview')
+
+# Make some API calls
+response1 = model.prompt(["What is 2+2?"], max_tokens=50)[0]
+response2 = model.prompt(["Explain quantum physics"], max_tokens=200)[0]
+
+# Get cost information
+info = model.get_info()
+print(f"Total calls: {info['calls']}")
+print(f"Input tokens: {info['input_tokens']}")
+print(f"Output tokens: {info['output_tokens']}")
+print(f"Total cost: ${info['actual_cost']:.6f}")
 ```
-print(llm.get_info())
-{'input_tokens': 99, 'output_tokens': 319, 'calls': 2, 'actual_input_tokens': 0, 'actual_output_tokens': 0, 'actual_calls': 0, 'cost_per_token': (0.0025, 0.01), 'cost': 0.0034375, 'actual_cost': 0.0}
-```
+
+### Cost Information Available
+
+- `calls`: Number of API calls made
+- `input_tokens`: Total input tokens used
+- `output_tokens`: Total output tokens generated
+- `actual_cost`: Real cost in USD
+- `cost`: Interface cost (may have bugs, use `actual_cost`)
 
 ## Caching
 
-We also support in-memory and disk caching. You can can enable caching by calling
-```
-llm.setup_cache('in_memory')
-```
-or
-```
-llm.setup_cache('disk', database_path='path-to-your-database.db')
-```
-or 
-```
-llm.setup_cache('disk_to_memory', database_path='path-to-your-database.db')
-```
+Save money and improve response times with disk-based caching:
 
-Further explanation for `disk_to_memory`: it is supposed to be use when you have multiple programs accessing the database at the same time, or when your disk is very slow and you have RAM to spare. It keeps the number of reads and writes to disk to the minimum. How it works is it loads the entire database to memory and does further caching as more data comes in in memory. To save that save/update that database to disk, please call `llm.cache.dump_to_disk()` (code for this is optimized to run fast by directly using SQLite commands).
+```python
+from llmbridge import create_llm, choose_provider
 
+choose_provider('openrouter')
+model = create_llm('google/gemini-2.5-pro-preview')
 
-## Setting OpenAI's api key
+# Set up disk caching
+model.setup_cache('disk', database_path='my_cache.db')
 
-For convenience, instead of setting the environment variable everytime you run, you can create `secrets.json` in the top-level directory. An example of it is:
-```
-{
-    "openai_api_key": "put-your-key-here",
-    "openrouter_api_key": "put-your-key-here"
-}
+# First call - will be slow and cache the result
+response1 = model.prompt(["What is the capital of France?"], max_tokens=100)[0]
+
+# Second call with same parameters - will be fast and use cache
+response2 = model.prompt(["What is the capital of France?"], max_tokens=100)[0]
+
+# Different parameters - will not use cache
+response3 = model.prompt(["What is the capital of France?"], max_tokens=200)[0]
 ```
 
-## Prompt formatting
+### Cache Behavior
 
-Feel free to write your own custom `PromptFormatter` and override the default `PromptFormatter` by calling the method `override_formatter`. Please look at the [formatter file](openai_hf_interface/formatter.py) for more information.
+- **Same prompt + same parameters**: Uses cache (fast, no cost)
+- **Same prompt + different parameters**: New API call (slow, costs money)
+- **Different prompt**: New API call (slow, costs money)
 
-## Feedback
+## Adding New Models
 
-Feel free to open a Github issue for any questions/feedback/issues. Pull request is also welcome!
+To add new models to the cost tracking system:
+
+### 1. Update the model list in `LLMBridge/llmbridge/utils.py`
+
+```python
+# Find this section in utils.py
+model_list = [
+    'gpt-3.5',
+    'gpt-4',
+    'o1',
+    'claude',
+    'gemini',
+    'llama',
+    'your-new-model'  # Add your new model here
+]
+```
+
+### 2. Update cost information in `LLMBridge/llmbridge/openai.py`
+
+Find the `get_cost` function and add pricing for your model:
+
+```python
+def get_cost(self, model_name, input_tokens, output_tokens):
+    # Add your model's pricing here
+    if 'your-new-model' in model_name:
+        input_cost_per_1k = 0.001  # $0.001 per 1k input tokens
+        output_cost_per_1k = 0.002  # $0.002 per 1k output tokens
+    elif 'gpt-4' in model_name:
+        input_cost_per_1k = 0.03
+        output_cost_per_1k = 0.06
+    # ... other models
+    
+    input_cost = (input_tokens / 1000) * input_cost_per_1k
+    output_cost = (output_tokens / 1000) * output_cost_per_1k
+    return input_cost + output_cost
+```
+
+### 3. Reinstall the package
+
+```bash
+# Uninstall the old version
+uv pip uninstall llmbridge
+
+# Reinstall with your changes
+uv pip install -e LLMBridge/
+```
+
+## Complete Example
+
+```python
+import os
+import time
+from llmbridge import create_llm, choose_provider
+
+# Set up API key
+api_key = os.environ.get('OPENROUTER_API_KEY')
+if not api_key:
+    raise ValueError("Please set the OPENROUTER_API_KEY environment variable")
+
+# Configure the interface
+choose_provider('openrouter')
+model = create_llm('google/gemini-2.5-pro-preview')
+
+# Set up caching
+model.setup_cache('disk', database_path='cache.db')
+
+# Test caching with proper list format
+prompt = "Explain the benefits of caching in AI applications."
+
+print("1️⃣ First call (will cache):")
+start_time = time.time()
+response1 = model.prompt([prompt], max_tokens=500, temperature=0.5)[0]
+time1 = time.time() - start_time
+print(f"   Time: {time1:.3f} seconds")
+
+print("\n2️⃣ Second call (should use cache):")
+start_time = time.time()
+response2 = model.prompt([prompt], max_tokens=500, temperature=0.5)[0]
+time2 = time.time() - start_time
+print(f"   Time: {time2:.3f} seconds")
+
+# Get final stats
+info = model.get_info()
+print(f"\n📊 Final Stats:")
+print(f"   Total calls: {info['calls']}")
+print(f"   Total cost: ${info['actual_cost']:.6f}")
+```
+
+## Supported Models
+
+LLMBridge supports all models available through OpenRouter, including:
+
+- **Google**: gemini-2.5-pro-preview, gemini-2.0-flash-exp
+- **OpenAI**: gpt-4, gpt-3.5-turbo, gpt-4o
+- **Anthropic**: claude-3-opus, claude-3-sonnet, claude-3-haiku
+- **Meta**: llama-3.1-8b-instruct, llama-3.1-70b-instruct
+- **And many more** available through OpenRouter's marketplace
+
+## Troubleshooting
+
+### Common Issues
+
+1. **ModuleNotFoundError**: Make sure you've activated the virtual environment:
+   ```bash
+   source .venv/bin/activate
+   ```
+
+2. **API Key Error**: Ensure your OpenRouter API key is set:
+   ```bash
+   export OPENROUTER_API_KEY="your_key_here"
+   ```
+
+3. **String instead of list error**: Always pass prompts as lists:
+   ```python
+   # ❌ Wrong
+   model.prompt("Hello", max_tokens=100)
+   
+   # ✅ Correct
+   model.prompt(["Hello"], max_tokens=100)[0]
+   ```
+
+4. **Cost tracking not working**: Check that your model is in the `model_list` in `utils.py`
+
+## Contributing
+
+To add new features or fix bugs:
+
+1. Make your changes in the `LLMBridge/` directory
+2. Reinstall the package: `uv pip install -e LLMBridge/`
+3. Test your changes
+4. Submit a pull request
 
 ## License
 
-MIT
+MIT License - see LICENSE file for details.
